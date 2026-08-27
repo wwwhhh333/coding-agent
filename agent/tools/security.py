@@ -13,7 +13,10 @@ from pathlib import Path
 # (compiled pattern, human-readable reason)
 _DANGEROUS_PATTERNS: list[tuple[re.Pattern, str]] = [
     # destructive filesystem
-    (re.compile(r"\brm\s+-[a-z]*r[a-z]*f\b", re.IGNORECASE), "recursive force delete"),
+    # requires BOTH an -r and an -f flag (any order/combination) before the
+    # command separator; catches rm -rf, -fr, and split "-r -f" alike.
+    (re.compile(r"\brm\b(?=[^;\n|]*-[a-z]*r)(?=[^;\n|]*-[a-z]*f)[^;\n|]*",
+                re.IGNORECASE), "recursive force delete"),
     (re.compile(r"\bmkfs\b"), "filesystem creation"),
     (re.compile(r"\bdd\s+if="), "raw device write"),
     (re.compile(r"\bformat\s+"), "format"),
