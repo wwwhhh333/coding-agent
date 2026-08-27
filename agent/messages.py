@@ -50,12 +50,12 @@ def is_final_answer(msg: dict[str, Any]) -> bool:
 # ---------------------------------------------------------------------------
 
 def tool_calls_from_message(msg: Any) -> list[dict]:
-    """Convert an SDK assistant message's tool_calls into wire-format dicts.
+    """Convert an assistant message's tool_calls into wire-format dicts.
 
-    Accepts either an SDK ``ChatCompletionMessage`` (has ``tool_calls`` with
-    ``id``/``function`` attributes) or an already-wire-format dict.
+    Accepts either an SDK ``ChatCompletionMessage`` (attributes) or an
+    already-wire-format dict (keys).
     """
-    raw = getattr(msg, "tool_calls", None)
+    raw = msg.get("tool_calls") if isinstance(msg, dict) else getattr(msg, "tool_calls", None)
     if not raw:
         return []
 
