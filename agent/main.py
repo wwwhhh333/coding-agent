@@ -46,6 +46,13 @@ def _default_log_path(workspace: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
+    # The console locale on Chinese Windows is GBK; a model reply may contain
+    # chars it cannot encode (e.g. U+2713), which would crash the streamed
+    # output. Write UTF-8 and replace anything still unencodable.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     workspace = str(Path(args.dir).resolve())
     cfg = llm.load_config()
     if args.model:
