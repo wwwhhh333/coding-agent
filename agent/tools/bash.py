@@ -30,7 +30,11 @@ def run(
             ["bash", "-lc", command],
             cwd=str(cwd),
             capture_output=True,
-            text=True,
+            # Explicit UTF-8 decode (errors=replace guards stray bytes). The
+            # default text=True uses the locale encoding, which is GBK on
+            # Chinese Windows and drops any non-ASCII child output.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
