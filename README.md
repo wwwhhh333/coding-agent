@@ -1,9 +1,94 @@
 # coding-agent
 
-A minimal, transparent coding agent built from scratch: it talks to a large language model and autonomously reads/writes files and runs commands to complete programming tasks.
+一个从零手写的最小可理解编程智能体：不依赖任何 Agent 框架，只用 OpenAI 兼容的
+原生 `tool_calls` 循环，让大模型自主完成「读文件 / 写文件 / 跑命令」的编程任务。
 
-- Core loop: native tool calling (OpenAI-compatible `tool_calls`)
-- Context management: observation truncation + summarization compaction
-- Error handling: errors are observations — the model repairs its own mistakes
-- Safety: working-directory isolation, dangerous-command blocking, command timeout
-- Model-agnostic: switch providers via environment variables
+## 设计定位
+
+工业界已有 Claude Code、Codex 等成熟产品，但它们的核心机制被大量工程细节包裹。
+本项目把其中「最小可理解的 agent 内核」重新实现成几百行可读代码，回答一个问题：
+**一个 agent 为什么能自主干活？**
+
+三个刻意为之的取舍：
+
+- **不绑定单一模型** —— 走 OpenAI 兼容协议，模型通过环境变量切换（默认 `deepseek-chat`）
+- **不用 MCP / 插件体系** —— 固定 5 个手写工具，schema 与执行共用一个注册表
+- **不做沙箱** —— 策略防护而非沙箱：工作目录隔离 + 危险命令拦截 + 命令超时
+
+## 招牌特性
+
+1. **流式实时输出** —— 模型 token 逐个蹦出，终端「活着」（逐块解析 SSE 分片）
+2. **安全护栏** —— `rm -rf`、`git push --force` 等危险命令被拒绝并给出原因
+3. **上下文自管理** —— 长任务中途自动压缩历史，并在终端打印摘要，证明意图未丢
+
+## 架构
+
+```
+agent/
+├── llm.py          # 模型客户端：环境变量驱动、指数退避重试
+├── messages.py     # 消息构造 + 模型输出解析（tool_calls / 参数纠错）
+├── loop.py         # 主循环：终止条件、死循环检测、用户中断
+├── context.py      # 观察截断 + 摘要压缩（两级上下文管理）
+├── logging.py      # 终端 ANSI 输出 + JSONL 运行日志（可回放）
+├── main.py         # CLI 入口
+└── tools/
+    ├── registry.py # 工具 schema 与分发（单一事实来源）
+    ├── bash.py     # 子进程执行 + 超时 + 输出截断
+    ├── files.py    # 读 / 写 / 列目录 / 搜索
+    └── security.py # 工作目录隔离 + 危险命令拦截
+```
+
+每个模块只做一件事，主循环（`loop.py`）只负责编排与何时停止。
+
+## 快速开始
+
+要求 Python 3.11+，依赖仅 `openai`。
+
+```bash
+pip install -r requirements.txt
+
+# 模型配置走环境变量（厂商无关）
+export AGENT_API_KEY=sk-...
+# 可选：export AGENT_BASE_URL=...  export AGENT_MODEL=deepseek-chat
+
+# 运行一个任务
+python -m agent.main --task "列出当前目录的文件" --dir .
+```
+
+## 工具与安全
+
+5 个手写工具：`bash` / `read_file` / `write_file` / `list_files` / `search`。
+
+- 所有文件路径被限制在工作目录内，`../` 与符号链接逃逸会被拒绝
+- 危险命令（`rm -rf`、`mkfs`、`dd if=`、`sudo`、fork bomb、`git push --force`
+  等）在执行前被拦截并返回原因
+- 命令默认 30s 超时；工具输出有长度上限，防止上下文被撑爆
+
+## 终止条件
+
+| 情形 | 处理 |
+| --- | --- |
+| 正常完成 | 模型返回纯文本、不再调用工具 |
+| 步数上限 | 默认 30 步强制停止 |
+| 死循环 | 连续 3 次相同工具调用且无进展则终止 |
+| 用户中断 | Ctrl+C 立即停止 |
+| 致命错误 | API 认证失败 / 重试耗尽，给出明确报错 |
+
+## 上下文管理
+
+长任务时按「预算比例」触发压缩：保留系统提示与原始任务（意图固定），把中段历史
+交给模型浓缩成一条摘要，最近消息原样保留；同时每条工具观察超长即截断。
+
+## 测试
+
+```bash
+python -m unittest discover -s tests -t .
+```
+
+覆盖输出解析、上下文压缩、安全拦截、文件/命令工具、注册表分发、主循环终止逻辑
+（用 mock 流模拟模型，不依赖真实 API）。
+
+## 运行日志
+
+每次运行在工作目录生成 `agent-run-<时间戳>.jsonl`：每一步的工具名、参数、结果按
+JSON 逐行落盘，便于事后回放与排查。
